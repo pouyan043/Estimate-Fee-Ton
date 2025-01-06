@@ -8,8 +8,6 @@ This project is a Go application that estimates the transaction fees for TON and
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
 - [Usage](#usage)
-- [Project Structure](#project-structure)
-- [Function Documentation](#function-documentation)
   - [createHTTPClient](#createHTTPClient)
   - [estimateFee](#estimateFee)
   - [tonTransactionParams](#tonTransactionParams)
@@ -30,7 +28,7 @@ To install and run the project, follow these steps:
 
 1. Clone this repository:
     ```sh
-    git clone https://github.com/yourusername/ton-transaction-fee-estimator.git
+    git clone https://github.com/pouyan043/ton-transaction-fee-estimator.git
     ```
 
 2. Navigate to the project directory:
