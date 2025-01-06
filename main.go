@@ -40,7 +40,7 @@ type EstimatedFeeResponse struct {
 func main() {
 	// Define the parameters for the transaction
 	transactionParams := TransactionParams{
-		Address:  "UQDzyzjx1ctGzemStc-0KFTHvFeHrubf8QNizVsBYQidVyJ8", // Replace with the recipient address
+		Address:  "recipient address", // Replace with the recipient address
 		Body:     "te6ccgEBAQEAAgAAAA==",                             // Body of the transaction in base64 format
 		Value:    1000000000,                                         // Amount in nanograms (1 TON = 1e9 nanograms)
 		GasPrice: 1000000000,                                         // Gas price in nanograms
