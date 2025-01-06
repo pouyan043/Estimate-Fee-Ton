@@ -28,7 +28,7 @@ To install and run the project, follow these steps:
 
 1. Clone this repository:
     ```sh
-    git clone https://github.com/pouyan043/ton-transaction-fee-estimator.git
+    git clone https://github.com/pouyan043/Estimate-Fee-Ton.git
     ```
 
 2. Navigate to the project directory:
