@@ -19,7 +19,7 @@ This project is a Go application that estimates the transaction fees for TON and
 
 ## Prerequisites
 
-1. [Go](https://golang.org/doc/install) version 1.15 or higher
+1. [Go](https://golang.org/doc/install) version 1.24
 2. A valid API key from [toncenter.com](https://toncenter.com/)
 
 ## Installation
