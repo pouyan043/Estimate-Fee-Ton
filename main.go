@@ -2,224 +2,226 @@ package main
 
 import (
 	"bytes"
-	"encoding/base64"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net/http"
+	"net/url"
+	"os"
+	"strconv"
 	"time"
 )
 
-// TransactionParams struct to hold the transaction parameters
-type TransactionParams struct {
-	Address  string `json:"address"`   // Address to send
-	Body     string `json:"body"`      // Body of the transaction
-	Value    int64  `json:"value"`     // Amount in nanograms (1 TON = 1e9 nanograms)
-	GasPrice int64  `json:"gas_price"` // Gas price in nanograms
-	GasLimit int64  `json:"gas_limit"` // Gas limit
+type TransactionResult struct {
+	Fee        string `json:"fee"`
+	StorageFee string `json:"storage_fee"`
+	OtherFee   string `json:"other_fee"`
+	InMsg      struct {
+		MsgData struct {
+			Body string `json:"body"`
+		} `json:"msg_data"`
+		FwdFee string `json:"fwd_fee"`
+	} `json:"in_msg"`
 }
 
-// Fees struct to hold the fees information
+type GetTransactionResponse struct {
+	Ok     bool                `json:"ok"`
+	Result []TransactionResult `json:"result"`
+	Error  string              `json:"error"`
+}
+
+type EstimateRequestPayload struct {
+	Address      string `json:"address"`
+	Body         string `json:"body"`
+	IgnoreChksig bool   `json:"ignore_chksig"`
+}
+
 type Fees struct {
-	InFwdFee   int64 `json:"in_fwd_fee"`  // Inward forward fee
-	StorageFee int64 `json:"storage_fee"` // Storage fee
-	GasFee     int64 `json:"gas_fee"`     // Gas fee
-	FwdFee     int64 `json:"fwd_fee"`     // Forward fee
+	InFwdFee   int `json:"in_fwd_fee"`
+	StorageFee int `json:"storage_fee"`
+	GasFee     int `json:"gas_fee"`
+	FwdFee     int `json:"fwd_fee"`
 }
 
-// Balance struct to hold the balance information
-type Balance struct {
-	Balance string `json:"result"` // Balance as a string
+type EstimateResult struct {
+	SourceFees Fees   `json:"source_fees"`
+	Extra      string `json:"@extra"`
 }
 
-// EstimatedFeeResponse struct to hold the response from the API
-type EstimatedFeeResponse struct {
-	Ok     bool `json:"ok"` // Response status
-	Result struct {
-		SourceFees Fees `json:"source_fees"` // Source fees
-	} `json:"result"`
-	Error string `json:"error"` // Error message if any
+type EstimateResponsePayload struct {
+	Ok     bool           `json:"ok"`
+	Result EstimateResult `json:"result"`
+	Error  string         `json:"error"`
 }
 
-// createHTTPClient creates a custom HTTP client with a timeout
-func createHTTPClient() *http.Client {
-	return &http.Client{
-		Timeout: time.Second * 30, // Increase the timeout to 30 seconds
-	}
-}
-
-// sendRequest handles sending the HTTP request and retrying in case of rate limit exceeded
-func sendRequest(req *http.Request, client *http.Client) (*http.Response, error) {
-	for {
-		resp, err := client.Do(req)
-		if err != nil {
-			return nil, fmt.Errorf("failed to make the HTTP request: %v", err)
-		}
-		if resp.StatusCode == http.StatusTooManyRequests {
-			// Handle rate limit exceeded
-			fmt.Println("Rate limit exceeded, waiting for 60 seconds before retrying...")
-			time.Sleep(60 * time.Second)
-			continue
-		}
-		if resp.StatusCode != http.StatusOK {
-			body, _ := ioutil.ReadAll(resp.Body)
-			return nil, fmt.Errorf("unexpected status code: %d, response: %s", resp.StatusCode, string(body))
-		}
-		return resp, nil
-	}
-}
-
-// estimateFee sends a request to estimate fees for a transaction using toncenter.com API
-func estimateFee(transactionParams TransactionParams, apiKey string) (Fees, error) {
-	// Marshal the transaction parameters to JSON
-	jsonData, err := json.Marshal(transactionParams)
+// a modifire to handle erors
+func handleError(err error, context string) {
 	if err != nil {
-		return Fees{}, fmt.Errorf("failed to marshal transaction parameters: %v", err)
+		fmt.Fprintf(os.Stderr, "Error %s: %v\n", context, err)
+		os.Exit(1)
 	}
+}
 
-	// Print the JSON data for debugging
-	fmt.Println("JSON Data:", string(jsonData))
+// generateHash generates a SHA256 hash from address
+func generateHash(address string) string {
+	hash := sha256.Sum256([]byte(address))
+	return hex.EncodeToString(hash[:])
+}
 
-	client := createHTTPClient()
-	apiURL := "https://toncenter.com/api/v2/estimateFee"
-	req, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(jsonData))
-	if err != nil {
-		return Fees{}, fmt.Errorf("failed to create the HTTP request: %v", err)
-	}
+// generateURL generates the URL for the getTransactions API request.
+func generateURL(address string, limit int, hash string, toLt int, archival bool) string {
+	baseURL := "https://toncenter.com/api/v2/getTransactions"
+	params := url.Values{}
+	params.Add("address", address)
+	params.Add("limit", fmt.Sprintf("%d", limit))
+	params.Add("hash", hash)
+	params.Add("to_lt", fmt.Sprintf("%d", toLt))
+	params.Add("archival", fmt.Sprintf("%t", archival))
+
+	fullURL := fmt.Sprintf("%s?%s", baseURL, params.Encode())
+	return fullURL
+}
+
+// callGetTransaction sends a GET request to the getTransactions API and returns body
+func callGetTransaction(address string) (string, string, string, string, string, error) {
+	hash := generateHash(address)
+	url := generateURL(address, 100, hash, 0, true)
+	req, err := http.NewRequest("GET", url, nil)
+	handleError(err, "creating GET request")
+
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
 
-	resp, err := sendRequest(req, client)
-	if err != nil {
-		return Fees{}, err
+	client := &http.Client{
+		Timeout: 10 * time.Second,
 	}
+	resp, err := client.Do(req)
+	handleError(err, "making GET request")
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		return "", "", "", "", "", fmt.Errorf("request failed with status: %s", resp.Status)
+	}
+
 	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return Fees{}, fmt.Errorf("failed to read the response body: %v", err)
+	handleError(err, "reading response body")
+
+	var responsePayload GetTransactionResponse
+	err = json.Unmarshal(body, &responsePayload)
+	handleError(err, "decoding response payload")
+
+	if !responsePayload.Ok {
+		return "", "", "", "", "", fmt.Errorf("error from API: %s", responsePayload.Error)
 	}
 
-	// Print the response body for debugging
-	fmt.Println("Response Body:", string(body))
-
-	var estimatedFeeResponse EstimatedFeeResponse
-	err = json.Unmarshal(body, &estimatedFeeResponse)
-	if err != nil {
-		return Fees{}, fmt.Errorf("failed to unmarshal the response body: %v", err)
+	if len(responsePayload.Result) == 0 {
+		return "", "", "", "", "", fmt.Errorf("no transaction results found")
 	}
 
-	if !estimatedFeeResponse.Ok {
-		return Fees{}, fmt.Errorf("API error: %s", estimatedFeeResponse.Error)
-	}
-
-	return estimatedFeeResponse.Result.SourceFees, nil
+	// Extract body and fees from the first transaction in the result
+	transaction := responsePayload.Result[0]
+	return transaction.InMsg.MsgData.Body, transaction.Fee, transaction.StorageFee, transaction.OtherFee, transaction.InMsg.FwdFee, nil
 }
 
-// getBalance gets the balance for a given address using toncenter.com API
-func getBalance(address, apiKey string) (string, error) {
-	client := createHTTPClient()
-	apiURL := fmt.Sprintf("https://toncenter.com/api/v2/getAddressBalance?address=%s", address)
-	req, err := http.NewRequest("GET", apiURL, nil)
-	if err != nil {
-		return "", fmt.Errorf("failed to create the HTTP request: %v", err)
+// callEstimateFee sends a POST request to the estimateFee API and returns the estimated fees
+func callEstimateFee(walletAddress, body string) (*EstimateResult, error) {
+	requestPayload := EstimateRequestPayload{
+		Address:      walletAddress,
+		Body:         body,
+		IgnoreChksig: true,
 	}
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", apiKey))
 
-	resp, err := sendRequest(req, client)
-	if err != nil {
-		return "", err
+	requestBody, err := json.Marshal(requestPayload)
+	handleError(err, "marshalling request payload")
+
+	url := "https://toncenter.com/api/v2/estimateFee"
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(requestBody))
+	handleError(err, "creating POST request")
+
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{
+		Timeout: 10 * time.Second,
 	}
+	resp, err := client.Do(req)
+	handleError(err, "making POST request")
 	defer resp.Body.Close()
 
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read the response body: %v", err)
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := ioutil.ReadAll(resp.Body)
+		return nil, fmt.Errorf("request failed with status: %s, response: %s", resp.Status, string(bodyBytes))
 	}
 
-	// Print the response body for debugging
-	fmt.Println("Response Body (Balance):", string(body))
+	bodyBytes, err := ioutil.ReadAll(resp.Body)
+	handleError(err, "reading response body")
 
-	var balanceResponse Balance
-	err = json.Unmarshal(body, &balanceResponse)
-	if err != nil {
-		return "", fmt.Errorf("failed to unmarshal the response body: %v", err)
+	var responsePayload EstimateResponsePayload
+	err = json.Unmarshal(bodyBytes, &responsePayload)
+	handleError(err, "decoding response payload")
+
+	if !responsePayload.Ok {
+		return nil, fmt.Errorf("error from API: %s", responsePayload.Error)
 	}
 
-	return balanceResponse.Balance, nil
+	return &responsePayload.Result, nil
 }
 
-// tonTransactionParams defines the parameters for a TON transaction
-func tonTransactionParams() TransactionParams {
-	return TransactionParams{
-		Address:  "UQDnGipnUUjCzg3W-TslugOQluo45vC1Iqf3vI9TQxwd4vlg", // Correct TON address
-		Body:     "te6ccgEBAQEAAgAAAA==",                             // Body of the transaction in base64 format
-		Value:    1000000000,                                         // Amount in nanograms (1 TON = 1e9 nanograms)
-		GasPrice: 1000000000,                                         // Gas price in nanograms
-		GasLimit: 2000000,                                            // Gas limit
-	}
-}
-
-// usdtTransactionParams defines the parameters for a USDT transaction
-func usdtTransactionParams() TransactionParams {
-	body := "te6ccgEBAQEAAgAAAA=="
-	decodedBody, err := base64.StdEncoding.DecodeString(body)
+// convertNanotonToTon
+func convertNanotonToTon(nanoton string) (float64, error) {
+	value, err := strconv.ParseFloat(nanoton, 64)
 	if err != nil {
-		log.Fatalf("Failed to decode body: %v", err)
+		return 0, err
 	}
-
-	return TransactionParams{
-		Address:  "EQCS4UEa5UaJLzOyyKieqQOQ2P9M-7kXpkO5HnP3Bv250cN3", // Correct USDT address
-		Body:     base64.StdEncoding.EncodeToString(decodedBody),     // Ensure body is correctly formatted
-		Value:    1000000000,                                         // Amount in nanograms (1 TON = 1e9 nanograms)
-		GasPrice: 1000000000,                                         // Gas price in nanograms
-		GasLimit: 2000000,                                            // Gas limit
-	}
-}
-
-// printFees prints the estimated fees
-func printFees(title string, fees Fees) {
-	fmt.Println(title)
-	fmt.Printf("Inward Forward Fee: %d nanograms\n", fees.InFwdFee)
-	fmt.Printf("Storage Fee: %d nanograms\n", fees.StorageFee)
-	fmt.Printf("Gas Fee: %d nanograms\n", fees.GasFee)
-	fmt.Printf("Forward Fee: %d nanograms\n", fees.FwdFee)
+	return value / 1e9, nil
 }
 
 func main() {
-	apiKey := "71f38d1c2b38074d85e0bd035d8648bcb7e7be66c81f0756b497e682f29996a8" // Correct API key
+	walletAddress := "EQCS4UEa5UaJLzOyyKieqQOQ2P9M-7kXpkO5HnP3Bv250cN3"
 
-	// Estimate fee for TON transaction
-	tonFees, err := estimateFee(tonTransactionParams(), apiKey)
-	if err != nil {
-		log.Fatalf("Failed to estimate fee for TON transaction: %v", err)
-	}
+	// Generate hash from wallet address
+	hash := generateHash(walletAddress)
+	fmt.Printf("Generated Hash: %s\n", hash)
 
-	// Estimate fee for USDT transaction
-	usdtFees, err := estimateFee(usdtTransactionParams(), apiKey)
-	if err != nil {
-		log.Fatalf("Failed to estimate fee for USDT transaction: %v", err)
-	}
+	// Call getTransaction with wallet address
+	body, fee, storageFee, otherFee, fwdFee, err := callGetTransaction(walletAddress)
+	handleError(err, "calling getTransaction API")
 
-	// Get balance for TON address
-	tonBalance, err := getBalance(tonTransactionParams().Address, apiKey)
-	if err != nil {
-		log.Fatalf("Failed to get balance for TON address: %v", err)
-	}
+	// Convert fees from nanoton to ton
+	feeInTon, err := convertNanotonToTon(fee)
+	handleError(err, "converting fee from nanoton to ton")
 
-	// Get balance for USDT address
-	usdtBalance, err := getBalance(usdtTransactionParams().Address, apiKey)
-	if err != nil {
-		log.Fatalf("Failed to get balance for USDT address: %v", err)
-	}
+	storageFeeInTon, err := convertNanotonToTon(storageFee)
+	handleError(err, "converting storage fee from nanoton to ton")
 
-	// Print the estimated fees for TON transaction
-	printFees("TON Transaction Fees:", tonFees)
-	fmt.Printf("TON Address Balance: %s nanograms\n", tonBalance)
+	otherFeeInTon, err := convertNanotonToTon(otherFee)
+	handleError(err, "converting other fee from nanoton to ton")
 
-	// Print the estimated fees for USDT transaction
-	printFees("USDT Transaction Fees:", usdtFees)
-	fmt.Printf("USDT Address Balance: %s nanograms\n", usdtBalance)
+	fwdFeeInTon, err := convertNanotonToTon(fwdFee)
+	handleError(err, "converting forward fee from nanoton to ton")
+
+	// Print the retrieved body and fees
+	fmt.Printf("Retrieved Body: %s\n", body)
+	fmt.Printf("Transaction Fee: %s nanoton (%.9f ton)\n", fee, feeInTon)
+	fmt.Printf("Storage Fee: %s nanoton (%.9f ton)\n", storageFee, storageFeeInTon)
+	fmt.Printf("Other Fee: %s nanoton (%.9f ton)\n", otherFee, otherFeeInTon)
+	fmt.Printf("Forward Fee: %s nanoton (%.9f ton)\n", fwdFee, fwdFeeInTon)
+
+	// Call estimateFee with wallet address and body
+	estimateResult, err := callEstimateFee(walletAddress, body)
+	handleError(err, "calling estimateFee API")
+
+	// Convert estimated fees from nanoton to ton
+	inFwdFeeInTon := float64(estimateResult.SourceFees.InFwdFee) / 1e9
+	storageFeeEstInTon := float64(estimateResult.SourceFees.StorageFee) / 1e9
+	gasFeeInTon := float64(estimateResult.SourceFees.GasFee) / 1e9
+	fwdFeeEstInTon := float64(estimateResult.SourceFees.FwdFee) / 1e9
+
+	fmt.Println("\nEstimate Fee Details:")
+	fmt.Printf("  Source Fees:\n")
+	fmt.Printf("    In Forward Fee: %d nanoton (%.9f ton)\n", estimateResult.SourceFees.InFwdFee, inFwdFeeInTon)
+	fmt.Printf("    Storage Fee: %d nanoton (%.9f ton)\n", estimateResult.SourceFees.StorageFee, storageFeeEstInTon)
+	fmt.Printf("    Gas Fee: %d nanoton (%.9f ton)\n", estimateResult.SourceFees.GasFee, gasFeeInTon)
+	fmt.Printf("    Forward Fee: %d nanoton (%.9f ton)\n", estimateResult.SourceFees.FwdFee, fwdFeeEstInTon)
+	fmt.Printf("  Extra: %s\n", estimateResult.Extra)
 }
-
