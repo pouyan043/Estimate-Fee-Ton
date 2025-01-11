@@ -177,7 +177,7 @@ func convertNanotonToTon(nanoton string) (float64, error) {
 }
 
 func main() {
-	walletAddress := "EQCS4UEa5UaJLzOyyKieqQOQ2P9M-7kXpkO5HnP3Bv250cN3"
+	walletAddress := "EQCS4UEa5UaJLzOyyKieqQOQ2P9M-7kXpkO5HnP3Bv250cN3" /// replace your wallet address here 
 
 	// Generate hash from wallet address
 	hash := generateHash(walletAddress)
