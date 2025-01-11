@@ -119,7 +119,7 @@ func callGetTransaction(address string) (string, string, string, string, string,
 		return "", "", "", "", "", fmt.Errorf("no transaction results found")
 	}
 
-	// Extract body and fees from the first transaction in the result
+	// Extract body and fees from transaction in the result
 	transaction := responsePayload.Result[0]
 	return transaction.InMsg.MsgData.Body, transaction.Fee, transaction.StorageFee, transaction.OtherFee, transaction.InMsg.FwdFee, nil
 }
