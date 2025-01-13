@@ -22,9 +22,12 @@ To install this tool, follow these steps:
 
 ## Usage
 
-### Step 1: Generate Hash and Send GET Request to Fetch Transactions
 
-In this step, we generate a SHA256 hash from the wallet address and then send a GET request with address and hash inputs .
+## step 1 : go run main.go
+
+### Step 2: Generate Hash and Send GET Request to Fetch Transactions
+
+In this step, we filing inputes and then send a GET request with parameters inputs .
 
 then it returns body 
 
@@ -32,8 +35,11 @@ then it returns body
 GetTransaction returns body
 so we make body from informations in transaction 
 
-### step 2 : now we Generated body so we send a new GET Request to GetEstimate api 
+### step 3 : now we Generated body so we send a new POST Request to GetEstimate api 
 
- we use body and address in our GET Request inputs and it returns estimated fee 
-
- ## step 3 : go run main.go
+ we filing inputs =  init_code": " this is the amount of value to send",
+  "init_data":"this is the gas limit"
+  then it will returns 2 fees:
+  -1 : the fees for transaction that u filled
+  -2 : the fees for estimated fee
+ 
