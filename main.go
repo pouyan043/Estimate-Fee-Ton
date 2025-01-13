@@ -2,8 +2,6 @@ package main
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -36,6 +34,8 @@ type EstimateRequestPayload struct {
 	Address      string `json:"address"`
 	Body         string `json:"body"`
 	IgnoreChksig bool   `json:"ignore_chksig"`
+	InitCode     string `json:"init_code"`
+	InitData     string `json:"init_data"`
 }
 
 type Fees struct {
@@ -56,18 +56,12 @@ type EstimateResponsePayload struct {
 	Error  string         `json:"error"`
 }
 
-// a modifire to handle erors
+// a modifier to handle errors
 func handleError(err error, context string) {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error %s: %v\n", context, err)
 		os.Exit(1)
 	}
-}
-
-// generateHash generates a SHA256 hash from address
-func generateHash(address string) string {
-	hash := sha256.Sum256([]byte(address))
-	return hex.EncodeToString(hash[:])
 }
 
 // generateURL generates the URL for the getTransactions API request.
@@ -85,9 +79,8 @@ func generateURL(address string, limit int, hash string, toLt int, archival bool
 }
 
 // callGetTransaction sends a GET request to the getTransactions API and returns body
-func callGetTransaction(address string) (string, string, string, string, string, error) {
-	hash := generateHash(address)
-	url := generateURL(address, 100, hash, 0, true)
+func callGetTransaction(address string, limit int, hash string, toLt int, archival bool) (string, string, string, string, string, error) {
+	url := generateURL(address, limit, hash, toLt, archival)
 	req, err := http.NewRequest("GET", url, nil)
 	handleError(err, "creating GET request")
 
@@ -125,11 +118,13 @@ func callGetTransaction(address string) (string, string, string, string, string,
 }
 
 // callEstimateFee sends a POST request to the estimateFee API and returns the estimated fees
-func callEstimateFee(walletAddress, body string) (*EstimateResult, error) {
+func callEstimateFee(walletAddress, body, initCode, initData string) (*EstimateResult, error) {
 	requestPayload := EstimateRequestPayload{
 		Address:      walletAddress,
 		Body:         body,
 		IgnoreChksig: true,
+		InitCode:     initCode,
+		InitData:     initData,
 	}
 
 	requestBody, err := json.Marshal(requestPayload)
@@ -167,61 +162,80 @@ func callEstimateFee(walletAddress, body string) (*EstimateResult, error) {
 	return &responsePayload.Result, nil
 }
 
-// convertNanotonToTon
-func convertNanotonToTon(nanoton string) (float64, error) {
-	value, err := strconv.ParseFloat(nanoton, 64)
-	if err != nil {
-		return 0, err
-	}
-	return value / 1e9, nil
+// convertNanotonToTon converts nanoton to ton
+func convertNanotonToTon(nanoton int) float64 {
+	return float64(nanoton) / 1e9
 }
 
 func main() {
-	walletAddress := "EQCS4UEa5UaJLzOyyKieqQOQ2P9M-7kXpkO5HnP3Bv250cN3" /// replace your wallet address here 
+	fmt.Print("Enter wallet address: ")
+	var walletAddress string
+	fmt.Scanln(&walletAddress)
 
-	// Generate hash from wallet address
-	hash := generateHash(walletAddress)
-	fmt.Printf("Generated Hash: %s\n", hash)
+	fmt.Print("Enter hash: ")
+	var hash string
+	fmt.Scanln(&hash)
 
-	// Call getTransaction with wallet address
-	body, fee, storageFee, otherFee, fwdFee, err := callGetTransaction(walletAddress)
+	fmt.Print("Enter limit: ")
+	var limit int
+	fmt.Scanln(&limit)
+
+	fmt.Print("Enter to_lt: ")
+	var toLt int
+	fmt.Scanln(&toLt)
+
+	fmt.Print("Enter archival (true/false): ")
+	var archival bool
+	fmt.Scanln(&archival)
+
+	fmt.Print("Enter init code: ")
+	var initCode string
+	fmt.Scanln(&initCode)
+
+	fmt.Print("Enter init data: ")
+	var initData string
+	fmt.Scanln(&initData)
+
+	// Call getTransaction with wallet address, hash, limit, toLt, and archival
+	body, fee, storageFee, otherFee, fwdFee, err := callGetTransaction(walletAddress, limit, hash, toLt, archival)
 	handleError(err, "calling getTransaction API")
 
-	// Convert fees from nanoton to ton
-	feeInTon, err := convertNanotonToTon(fee)
-	handleError(err, "converting fee from nanoton to ton")
+	// Convert fees from nanoton to ton and aggregate them
+	feeNanoton, _ := strconv.Atoi(fee)
+	storageFeeNanoton, _ := strconv.Atoi(storageFee)
+	otherFeeNanoton, _ := strconv.Atoi(otherFee)
+	fwdFeeNanoton, _ := strconv.Atoi(fwdFee)
 
-	storageFeeInTon, err := convertNanotonToTon(storageFee)
-	handleError(err, "converting storage fee from nanoton to ton")
-
-	otherFeeInTon, err := convertNanotonToTon(otherFee)
-	handleError(err, "converting other fee from nanoton to ton")
-
-	fwdFeeInTon, err := convertNanotonToTon(fwdFee)
-	handleError(err, "converting forward fee from nanoton to ton")
+	totalFeeNanoton := feeNanoton + storageFeeNanoton + otherFeeNanoton + fwdFeeNanoton
+	totalFeeTon := convertNanotonToTon(totalFeeNanoton)
 
 	// Print the retrieved body and fees
 	fmt.Printf("Retrieved Body: %s\n", body)
-	fmt.Printf("Transaction Fee: %s nanoton (%.9f ton)\n", fee, feeInTon)
-	fmt.Printf("Storage Fee: %s nanoton (%.9f ton)\n", storageFee, storageFeeInTon)
-	fmt.Printf("Other Fee: %s nanoton (%.9f ton)\n", otherFee, otherFeeInTon)
-	fmt.Printf("Forward Fee: %s nanoton (%.9f ton)\n", fwdFee, fwdFeeInTon)
+	fmt.Printf("Transaction Fee: %d nanoton (%.9f ton)\n", feeNanoton, convertNanotonToTon(feeNanoton))
+	fmt.Printf("Storage Fee: %d nanoton (%.9f ton)\n", storageFeeNanoton, convertNanotonToTon(storageFeeNanoton))
+	fmt.Printf("Other Fee: %d nanoton (%.9f ton)\n", otherFeeNanoton, convertNanotonToTon(otherFeeNanoton))
+	fmt.Printf("Forward Fee: %d nanoton (%.9f ton)\n", fwdFeeNanoton, convertNanotonToTon(fwdFeeNanoton))
+	fmt.Printf("Total Transaction Fee: %d nanoton (%.9f ton)\n", totalFeeNanoton, totalFeeTon)
 
-	// Call estimateFee with wallet address and body
-	estimateResult, err := callEstimateFee(walletAddress, body)
+	// Call estimateFee with wallet address, body, init code, and init data
+	estimateResult, err := callEstimateFee(walletAddress, body, initCode, initData)
 	handleError(err, "calling estimateFee API")
 
-	// Convert estimated fees from nanoton to ton
-	inFwdFeeInTon := float64(estimateResult.SourceFees.InFwdFee) / 1e9
-	storageFeeEstInTon := float64(estimateResult.SourceFees.StorageFee) / 1e9
-	gasFeeInTon := float64(estimateResult.SourceFees.GasFee) / 1e9
-	fwdFeeEstInTon := float64(estimateResult.SourceFees.FwdFee) / 1e9
+	// Convert estimated fees from nanoton to ton and aggregate them
+	inFwdFeeNanoton := estimateResult.SourceFees.InFwdFee
+	storageFeeEstNanoton := estimateResult.SourceFees.StorageFee
+	gasFeeNanoton := estimateResult.SourceFees.GasFee
+	fwdFeeEstNanoton := estimateResult.SourceFees.FwdFee
+
+	totalEstimatedFeeNanoton := inFwdFeeNanoton + storageFeeEstNanoton + gasFeeNanoton + fwdFeeEstNanoton
+	totalEstimatedFeeTon := convertNanotonToTon(totalEstimatedFeeNanoton)
 
 	fmt.Println("\nEstimate Fee Details:")
 	fmt.Printf("  Source Fees:\n")
-	fmt.Printf("    In Forward Fee: %d nanoton (%.9f ton)\n", estimateResult.SourceFees.InFwdFee, inFwdFeeInTon)
-	fmt.Printf("    Storage Fee: %d nanoton (%.9f ton)\n", estimateResult.SourceFees.StorageFee, storageFeeEstInTon)
-	fmt.Printf("    Gas Fee: %d nanoton (%.9f ton)\n", estimateResult.SourceFees.GasFee, gasFeeInTon)
-	fmt.Printf("    Forward Fee: %d nanoton (%.9f ton)\n", estimateResult.SourceFees.FwdFee, fwdFeeEstInTon)
+	fmt.Printf("    In Forward Fee: %d nanoton (%.9f ton)\n", inFwdFeeNanoton, convertNanotonToTon(inFwdFeeNanoton))
+	fmt.Printf("    Storage Fee: %d nanoton (%.9f ton)\n", storageFeeEstNanoton, convertNanotonToTon(storageFeeEstNanoton))
+	fmt.Printf("    Gas Fee: %d nanoton (%.9f ton)\n", gasFeeNanoton, convertNanotonToTon(gasFeeNanoton))
+	fmt.Printf("    Forward Fee: %d nanoton (%.9f ton)\n", fwdFeeEstNanoton, convertNanotonToTon(fwdFeeEstNanoton))
+	fmt.Printf("  Total Estimated Fee: %d nanoton (%.9f ton)\n", totalEstimatedFeeNanoton, totalEstimatedFeeTon)
 	fmt.Printf("  Extra: %s\n", estimateResult.Extra)
 }
