@@ -22,6 +22,15 @@ To install this tool, follow these steps:
 
 ## Usage
 
+## Description of entries :
+1 : GET transaction : addresss - Maximum number of transactions in response - Logical time of transaction to start with must be sent with hash - Hash of transaction to start with, in base64 or hex encoding , must be sent with lt - Logical time of transaction to finish with (to get tx from lt to to_lt) - and a bool
+
+2 : POST estimated fee : "address": "string",
+  "body": "string",
+  "init_code": "", /// this one is the value that u wanna send
+  "init_data": "", /// this is gas limit
+  "ignore_chksig": true
+
 
 ## step 1 : go run main.go
 
@@ -37,9 +46,8 @@ so we make body from informations in transaction
 
 ### step 3 : now we Generated body so we send a new POST Request to GetEstimate api 
 
- we filing inputs =  init_code": " this is the amount of value to send",
-  "init_data":"this is the gas limit"
+ ### we filing inputs :
   then it will returns 2 fees:
-  -1 : the fees for transaction that u filled
-  -2 : the fees for estimated fee
+  -1 : the fees for transaction that u were looking for
+  -2 : the estimated fee for future
  
