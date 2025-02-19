@@ -221,13 +221,6 @@ func SendTransaction(ctx context.Context, privateKey ed25519.PrivateKey, targetA
 		fmt.Println("Transaction cancelled by user.")
 		return
 	}
-
-	txnHash, err := w.SendManyWaitTxHash(ctx, messages)
-	if err != nil {
-		log.Fatalf("error sending transaction: %v", err)
-	}
-
-	log.Println("Transaction(s) sent successfully. TXN HASH:", string(txnHash))
 }
 
 func createBase64Body(body string) *cell.Cell {
